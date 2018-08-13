@@ -1,0 +1,20 @@
+{
+  "name": "dijivu",
+  "version": "1.0.0",
+  "description": "Digital Publication Creator ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ipa-dev/dijivu.git"
+  },
+  "author": "Mason Watson",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ipa-dev/dijivu/issues"
+  },
+  "homepage": "https://github.com/ipa-dev/dijivu#readme",
+  "dependencies": {}
+}
