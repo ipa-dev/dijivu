@@ -1,0 +1,9 @@
+[11-Oct-2017 15:54:55 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[23-Jan-2018 08:04:40 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[24-Jan-2018 07:46:07 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[24-Jan-2018 07:55:10 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[24-Jan-2018 07:57:15 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[24-Jan-2018 08:01:12 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[06-Feb-2018 23:36:20 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[07-Mar-2018 12:54:25 UTC] PHP Fatal error:  Call to undefined function add_action() in /home/dijivu/public_html/wp-content/plugins/hello.php on line 60
+[31-May-2018 16:33:14 UTC] PHP Fatal error:  Call to undefined function add_action() in /home2/dijivu/public_html/wp-content/plugins/hello.php on line 60
