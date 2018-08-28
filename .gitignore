@@ -3,3 +3,4 @@ wp-content/themes/dijivu/node_modules
 .env
 vendor
 wp-content/uploads
+wp-config.php
