@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: Multipart robots.txt editor
-Version: 0.3.0
+Version: 0.4.0
 Description: Customize your site's robots.txt and include remote content to it
 Plugin URI: https://github.com/szepeviktor/multipart-robotstxt-editor
 License: The MIT License (MIT)
@@ -386,7 +386,9 @@ Disallow: %1$s/wp-admin/
         if ( ! current_user_can( 'activate_plugins' ) )
             return;
 
-        check_admin_referer( 'bulk-plugins' );
+        if ( ! wp_doing_ajax() ) {
+            check_admin_referer( 'bulk-plugins' );
+        }
 
         $plugin_option = get_option( 'mprt_plugin' );
         if ( $plugin_option && true == $plugin_option['forget_records'] )

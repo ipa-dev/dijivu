@@ -1,4 +1,4 @@
-<?php                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  ?><?php
+<?php
 
 class acf_field_relationship extends acf_field
 {
