@@ -5,6 +5,7 @@
  *
  * @author Igor Timoshenkov <igor.timoshenkov@gmail.com>
  * @author Jan-Petter Gundersen <europe.jpg@gmail.com>
+ * @license https://github.com/t1gor/Robots.txt-Parser-Class#license
  *
  * Logic schema and signals:
  * @link   https://docs.google.com/document/d/1_rNjxpnUUeJG13ap6cnXM6Sx9ZQtd1ngADXnW9SHJSE
@@ -60,7 +61,7 @@ class RobotsTxtParser
     protected $log = array();
 
     // internally used variables
-    protected $current_UserAgent = [];
+    protected $current_UserAgent = array();
     protected $current_word = '';
     protected $current_char = '';
     protected $char_index = 0;
@@ -392,13 +393,13 @@ class RobotsTxtParser
     {
         $ua = mb_strtolower(trim($this->current_word));
         if ($this->previous_directive !== self::DIRECTIVE_USERAGENT) {
-            $this->current_UserAgent = [];
+            $this->current_UserAgent = array();
         }
         $this->current_UserAgent[] = $ua;
 
         // create empty array if not there yet
         if (empty($this->rules[$ua])) {
-            $this->rules[$ua] = [];
+            $this->rules[$ua] = array();
         }
     }
 
@@ -673,7 +674,8 @@ class RobotsTxtParser
     private static function stripUserAgentVersion($userAgent)
     {
         if (strpos($userAgent, '/') !== false) {
-            return explode('/', $userAgent, 2)[0];
+            $tmp = explode('/', $userAgent, 2);
+            return $tmp[0];
         }
         return $userAgent;
     }
@@ -1010,7 +1012,7 @@ class RobotsTxtParser
     {
         $input = $this->getRules();
         krsort($input);
-        $output = [];
+        $output = array();
         foreach ($input as $userAgent => $rules) {
             $output[] = 'User-agent: ' . $userAgent;
             foreach ($rules as $directive => $value) {

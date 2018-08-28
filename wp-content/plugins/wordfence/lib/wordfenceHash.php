@@ -18,6 +18,7 @@ class wordfenceHash {
 	private $coreUnknownEnabled = false;
 	private $knownFiles = false;
 	private $malwareData = "";
+	private $coreHashesData = '';
 	private $haveIssues = array();
 	private $status = array();
 	private $possibleMalware = array();
@@ -41,7 +42,7 @@ class wordfenceHash {
 	 * @param wfScanEngine $engine
 	 * @throws Exception
 	 */
-	public function __construct($striplen, $path, $only, $themes, $plugins, $engine, $malwarePrefixesHash){
+	public function __construct($striplen, $path, $only, $themes, $plugins, $engine, $malwarePrefixesHash, $coreHashesHash, $scanMode) {
 		$this->striplen = $striplen;
 		$this->path = $path;
 		$this->only = $only;
@@ -49,29 +50,20 @@ class wordfenceHash {
 
 		$this->startTime = microtime(true);
 
-		if(wfConfig::get('scansEnabled_core')){
-			$this->coreEnabled = true;
-		}
-		if(wfConfig::get('scansEnabled_plugins')){
-			$this->pluginsEnabled = true;
-		}
-		if(wfConfig::get('scansEnabled_themes')){
-			$this->themesEnabled = true;
-		}
-		if(wfConfig::get('scansEnabled_malware')){
-			$this->malwareEnabled = true;
-		}
-		if(wfConfig::get('scansEnabled_coreUnknown')){
-			$this->coreUnknownEnabled = true;
-		}
+		$options = $this->engine->scanController()->scanOptions();
+		if ($options['scansEnabled_core']) { $this->coreEnabled = true; }
+		if ($options['scansEnabled_plugins']) { $this->pluginsEnabled = true; }
+		if ($options['scansEnabled_themes']) { $this->themesEnabled = true; }
+		if ($options['scansEnabled_malware']) { $this->malwareEnabled = true; }
+		if ($options['scansEnabled_coreUnknown']) { $this->coreUnknownEnabled = true; }
 
 		$this->db = new wfDB();
 
 		//Doing a delete for now. Later we can optimize this to only scan modified files.
-		//$this->db->queryWrite("update " . $this->db->prefix() . "wfFileMods set oldMD5 = newMD5");			
-		$this->db->truncate($this->db->prefix() . "wfFileMods");
-		$this->db->truncate($this->db->prefix() . "wfKnownFileList");
-		$this->db->truncate($this->db->prefix() . "wfPendingIssues");
+		//$this->db->queryWrite("update " . wfDB::networkTable('wfFileMods') . " set oldMD5 = newMD5");
+		$this->db->truncate(wfDB::networkTable('wfFileMods'));
+		$this->db->truncate(wfDB::networkTable('wfKnownFileList'));
+		$this->db->truncate(wfDB::networkTable('wfPendingIssues'));
 		$fetchCoreHashesStatus = wfIssues::statusStart("Fetching core, theme and plugin file signatures from Wordfence");
 		try {
 			$this->knownFiles = $this->engine->getKnownFilesLoader()->getKnownFiles();
@@ -108,6 +100,35 @@ class wordfenceHash {
 			$this->malwareData = $stored['prefixes'];
 			wfIssues::statusEnd($malwarePrefixStatus, wfIssues::STATUS_SUCCESS);
 		}
+		
+		if ($this->coreUnknownEnabled) {
+			$coreHashesStatus = wfIssues::statusStart("Fetching list of known core files from Wordfence");
+			
+			$stored = wfConfig::get_ser('coreHashes', array(), false);
+			if (is_array($stored) && isset($stored['hash']) && $stored['hash'] == $coreHashesHash && isset($stored['hashes']) && wfWAFUtils::strlen($stored['hashes']) > 0 && wfWAFUtils::strlen($stored['hashes']) % 32 == 0) {
+				wordfence::status(4, 'info', "Using cached core hashes");
+			}
+			else {
+				wordfence::status(4, 'info', "Fetching fresh core hashes");
+				
+				$coreHashesData = $engine->api->getStaticURL('/coreHashes.bin');
+				if (!$coreHashesData) {
+					wfIssues::statusEndErr();
+					throw new Exception("Could not fetch core hashes from Wordfence servers.");
+				}
+				
+				if (wfWAFUtils::strlen($coreHashesData) % 32 != 0) {
+					wfIssues::statusEndErr();
+					throw new Exception("Core hashes data received from Wordfence servers was not valid.");
+				}
+				
+				$stored = array('hash' => $coreHashesHash, 'hashes' => $coreHashesData);
+				wfConfig::set_ser('coreHashes', $stored, true, wfConfig::DONT_AUTOLOAD);
+			}
+			
+			$this->coreHashesData = $stored['hashes'];
+			wfIssues::statusEnd($coreHashesStatus, wfIssues::STATUS_SUCCESS);
+		}
 
 		if($this->path[strlen($this->path) - 1] != '/'){
 			$this->path .= '/';
@@ -122,11 +143,14 @@ class wordfenceHash {
 			'plugins' => wfIssues::STATUS_SECURE,
 			'malware' => wfIssues::STATUS_SECURE,
 			);
-		if($this->coreEnabled){ $this->status['core'] = wfIssues::statusStart("Comparing core WordPress files against originals in repository"); } else { wfIssues::statusDisabled("Skipping core scan"); }
-		if($this->themesEnabled){ $this->status['themes'] = wfIssues::statusStart("Comparing open source themes against WordPress.org originals"); } else { wfIssues::statusDisabled("Skipping theme scan"); }
-		if($this->pluginsEnabled){ $this->status['plugins'] = wfIssues::statusStart("Comparing plugins against WordPress.org originals"); } else { wfIssues::statusDisabled("Skipping plugin scan"); }
-		if($this->malwareEnabled){ $this->status['malware'] = wfIssues::statusStart("Scanning for known malware files"); } else { wfIssues::statusDisabled("Skipping malware scan"); }
-		if($this->coreUnknownEnabled){ $this->status['coreUnknown'] = wfIssues::statusStart("Scanning for unknown files in wp-admin and wp-includes"); } else { wfIssues::statusDisabled("Skipping unknown core file scan"); }
+		if($this->coreEnabled){ $this->status['core'] = wfIssues::statusStart("Comparing core WordPress files against originals in repository"); $this->engine->scanController()->startStage(wfScanner::STAGE_FILE_CHANGES); } else { wfIssues::statusDisabled("Skipping core scan"); }
+		if($this->themesEnabled){ $this->status['themes'] = wfIssues::statusStart("Comparing open source themes against WordPress.org originals"); $this->engine->scanController()->startStage(wfScanner::STAGE_FILE_CHANGES); } else { wfIssues::statusDisabled("Skipping theme scan"); }
+		if($this->pluginsEnabled){ $this->status['plugins'] = wfIssues::statusStart("Comparing plugins against WordPress.org originals"); $this->engine->scanController()->startStage(wfScanner::STAGE_FILE_CHANGES); } else { wfIssues::statusDisabled("Skipping plugin scan"); }
+		if($this->malwareEnabled){ $this->status['malware'] = wfIssues::statusStart("Scanning for known malware files"); $this->engine->scanController()->startStage(wfScanner::STAGE_MALWARE_SCAN); } else { wfIssues::statusDisabled("Skipping malware scan"); }
+		if($this->coreUnknownEnabled){ $this->status['coreUnknown'] = wfIssues::statusStart("Scanning for unknown files in wp-admin and wp-includes"); $this->engine->scanController()->startStage(wfScanner::STAGE_FILE_CHANGES); } else { wfIssues::statusDisabled("Skipping unknown core file scan"); }
+		
+		if ($options['scansEnabled_fileContents']) { $this->engine->scanController()->startStage(wfScanner::STAGE_MALWARE_SCAN); }
+		if ($options['scansEnabled_fileContentsGSB']) { $this->engine->scanController()->startStage(wfScanner::STAGE_CONTENT_SAFETY); }
 		
 		if ($this->coreUnknownEnabled && !$this->alertedOnUnknownWordPressVersion && empty($this->knownFiles['core'])) {
 			require(ABSPATH . 'wp-includes/version.php'); //defines $wp_version
@@ -158,6 +182,12 @@ class wordfenceHash {
 			$stored['prefixes'] = '';
 		}
 		$this->malwareData = $stored['prefixes'];
+		
+		$stored = wfConfig::get_ser('coreHashes', array(), false);
+		if (!isset($stored['hashes'])) {
+			$stored['hashes'] = '';
+		}
+		$this->coreHashesData = $stored['hashes'];
 	}
 	public function getSuspectedFiles() {
 		return array_keys($this->suspectedFiles);
@@ -204,10 +234,10 @@ class wordfenceHash {
 		$this->_processPendingIssues();
 		
 		wordfence::status(2, 'info', "Analyzed " . $this->totalFiles . " files containing " . wfUtils::formatBytes($this->totalData) . " of data.");
-		if($this->coreEnabled){ wfIssues::statusEnd($this->status['core'], $this->haveIssues['core']); }
-		if($this->themesEnabled){ wfIssues::statusEnd($this->status['themes'], $this->haveIssues['themes']); }
-		if($this->pluginsEnabled){ wfIssues::statusEnd($this->status['plugins'], $this->haveIssues['plugins']); }
-		if($this->coreUnknownEnabled){ wfIssues::statusEnd($this->status['coreUnknown'], $this->haveIssues['coreUnknown']); }
+		if($this->coreEnabled){ wfIssues::statusEnd($this->status['core'], $this->haveIssues['core']); $this->engine->scanController()->completeStage(wfScanner::STAGE_FILE_CHANGES, $this->haveIssues['core']); }
+		if($this->themesEnabled){ wfIssues::statusEnd($this->status['themes'], $this->haveIssues['themes']); $this->engine->scanController()->completeStage(wfScanner::STAGE_FILE_CHANGES, $this->haveIssues['themes']); }
+		if($this->pluginsEnabled){ wfIssues::statusEnd($this->status['plugins'], $this->haveIssues['plugins']); $this->engine->scanController()->completeStage(wfScanner::STAGE_FILE_CHANGES, $this->haveIssues['plugins']); }
+		if($this->coreUnknownEnabled){ wfIssues::statusEnd($this->status['coreUnknown'], $this->haveIssues['coreUnknown']); $this->engine->scanController()->completeStage(wfScanner::STAGE_FILE_CHANGES, $this->haveIssues['coreUnknown']); }
 		if(sizeof($this->possibleMalware) > 0){
 			$malwareResp = $engine->api->binCall('check_possible_malware', json_encode($this->possibleMalware));
 			if($malwareResp['code'] != 200){
@@ -241,7 +271,7 @@ class wordfenceHash {
 				}
 			}
 		}
-		if($this->malwareEnabled){ wfIssues::statusEnd($this->status['malware'], $this->haveIssues['malware']); }
+		if($this->malwareEnabled){ wfIssues::statusEnd($this->status['malware'], $this->haveIssues['malware']); $this->engine->scanController()->completeStage(wfScanner::STAGE_MALWARE_SCAN, $this->haveIssues['malware']); }
 		unset($this->knownFiles); $this->knownFiles = false;
 	}
 	private function _dirIndex($path, &$indexedFiles) {
@@ -328,7 +358,8 @@ class wordfenceHash {
 		
 		if (count($payload) > 0) {
 			global $wpdb;
-			$query = substr("INSERT INTO {$wpdb->base_prefix}wfKnownFileList (path) VALUES " . str_repeat("('%s'), ", count($payload)), 0, -2);
+			$table_wfKnownFileList = wfDB::networkTable('wfKnownFileList');
+			$query = substr("INSERT INTO {$table_wfKnownFileList} (path) VALUES " . str_repeat("('%s'), ", count($payload)), 0, -2);
 			$wpdb->query($wpdb->prepare($query, $payload));
 			$this->indexSize += count($payload);
 			wordfence::status(2, 'info', "{$this->indexSize} files indexed");
@@ -338,7 +369,8 @@ class wordfenceHash {
 		static $files = array();
 		if (count($files) == 0) {
 			global $wpdb;
-			$files = $wpdb->get_col($wpdb->prepare("SELECT path FROM {$wpdb->base_prefix}wfKnownFileList WHERE id > %d ORDER BY id ASC LIMIT 500", $this->currentIndex));
+			$table_wfKnownFileList = wfDB::networkTable('wfKnownFileList');
+			$files = $wpdb->get_col($wpdb->prepare("SELECT path FROM {$table_wfKnownFileList} WHERE id > %d ORDER BY id ASC LIMIT 500", $this->currentIndex));
 		}
 		
 		$file = null;
@@ -391,23 +423,25 @@ class wordfenceHash {
 		
 		return true;
 	}
-	private function processFile($realFile){
+	private function processFile($realFile) {
 		$file = substr($realFile, $this->striplen);
 		
-		if(wfUtils::fileTooBig($realFile)){
+		if (wfUtils::fileTooBig($realFile)) {
 			wordfence::status(4, 'info', "Skipping file larger than max size: $realFile");
 			return;
 		}
 		
 		if (function_exists('memory_get_usage')) {
 			wordfence::status(4, 'info', "Scanning: $realFile (Mem:" . sprintf('%.1f', memory_get_usage(true) / (1024 * 1024)) . "M)");
-		} else {
+		}
+		else {
 			wordfence::status(4, 'info', "Scanning: $realFile");
 		}
 		
 		wfUtils::beginProcessingFile($file);
-		$wfHash = self::wfHash($realFile); 
-		if($wfHash){
+		$wfHash = self::wfHash($realFile);
+		$this->engine->scanController()->incrementSummaryItem(wfScanner::SUMMARY_SCANNED_FILES);
+		if ($wfHash) {
 			$md5 = strtoupper($wfHash[0]);
 			$shac = strtoupper($wfHash[1]);
 			$knownFile = 0;
@@ -421,21 +455,17 @@ class wordfenceHash {
 				$allowKnownFileScan = !preg_match($knownFileExclude, $realFile);
 			}
 
-			if ($allowKnownFileScan)
-			{
-				if (isset($this->knownFiles['core'][$file]))
-				{
-					if (strtoupper($this->knownFiles['core'][$file]) == $shac)
-					{
+			if ($allowKnownFileScan) {
+				if (isset($this->knownFiles['core'][$file])) {
+					if (strtoupper($this->knownFiles['core'][$file]) == $shac) {
 						$knownFile = 1;
-					} else
-					{
-						if ($this->coreEnabled)
-						{
+					}
+					else {
+						if ($this->coreEnabled) {
 							$localFile = ABSPATH . '/' . preg_replace('/^[\.\/]+/', '', $file);
 							$fileContents = @file_get_contents($localFile);
 							if ($fileContents && (!preg_match('/<\?' . 'php[\r\n\s\t]*\/\/[\r\n\s\t]*Silence is golden\.[\r\n\s\t]*(?:\?>)?[\r\n\s\t]*$/s', $fileContents))) {
-								$added = $this->engine->addPendingIssue(
+								$this->engine->addPendingIssue(
 									'knownfile',
 									1,
 									'coreModified' . $file,
@@ -454,22 +484,20 @@ class wordfenceHash {
 							}
 						}
 					}
-				} else if (isset($this->knownFiles['plugins'][$file]))
-				{
-					if (in_array($shac, $this->knownFiles['plugins'][$file]))
-					{
+				}
+				else if (isset($this->knownFiles['plugins'][$file])) {
+					if (in_array($shac, $this->knownFiles['plugins'][$file])) {
 						$knownFile = 1;
-					} else
-					{
-						if ($this->pluginsEnabled)
-						{
+					}
+					else {
+						if ($this->pluginsEnabled) {
+							$options = $this->engine->scanController()->scanOptions();
 							$shouldGenerateIssue = true;
-							if (!wfConfig::get('scansEnabled_highSense') && preg_match('~/readme\.(?:txt|md)$~i', $file)) { //Don't generate issues for changed readme files unless high sensitivity is on
+							if (!$options['scansEnabled_highSense'] && preg_match('~/readme\.(?:txt|md)$~i', $file)) { //Don't generate issues for changed readme files unless high sensitivity is on
 								$shouldGenerateIssue = false;
 							}
 							
-							if ($shouldGenerateIssue)
-							{
+							if ($shouldGenerateIssue) {
 								$itemName = $this->knownFiles['plugins'][$file][0];
 								$itemVersion = $this->knownFiles['plugins'][$file][1];
 								$cKey = $this->knownFiles['plugins'][$file][2];
@@ -496,22 +524,20 @@ class wordfenceHash {
 						}
 
 					}
-				} else if (isset($this->knownFiles['themes'][$file]))
-				{
-					if (in_array($shac, $this->knownFiles['themes'][$file]))
-					{
+				}
+				else if (isset($this->knownFiles['themes'][$file])) {
+					if (in_array($shac, $this->knownFiles['themes'][$file])) {
 						$knownFile = 1;
-					} else
-					{
-						if ($this->themesEnabled)
-						{
+					}
+					else {
+						if ($this->themesEnabled) {
+							$options = $this->engine->scanController()->scanOptions();
 							$shouldGenerateIssue = true;
-							if (!wfConfig::get('scansEnabled_highSense') && preg_match('~/readme\.(?:txt|md)$~i', $file)) { //Don't generate issues for changed readme files unless high sensitivity is on
+							if (!$options['scansEnabled_highSense'] && preg_match('~/readme\.(?:txt|md)$~i', $file)) { //Don't generate issues for changed readme files unless high sensitivity is on
 								$shouldGenerateIssue = false;
 							}
 							
-							if ($shouldGenerateIssue)
-							{
+							if ($shouldGenerateIssue) {
 								$itemName = $this->knownFiles['themes'][$file][0];
 								$itemVersion = $this->knownFiles['themes'][$file][1];
 								$cKey = $this->knownFiles['themes'][$file][2];
@@ -541,34 +567,54 @@ class wordfenceHash {
 				}
 				else if ($this->coreUnknownEnabled && !$this->alertedOnUnknownWordPressVersion) { //Check for unknown files in system directories
 					$restrictedWordPressFolders = array(ABSPATH . 'wp-admin/', ABSPATH . WPINC . '/');
+					$added = false;
 					foreach ($restrictedWordPressFolders as $path) {
 						if (strpos($realFile, $path) === 0) {
-							$added = $this->engine->addIssue(
-								'knownfile',
-								2,
-								'coreUnknown' . $file,
-								'coreUnknown' . $file . $md5,
-								'Unknown file in WordPress core: ' . $file,
-								"This file is in a WordPress core location but is not distributed with this version of WordPress. This is usually due to it being left over from a previous WordPress update, but it may also have been added by another plugin or a malicious file added by an attacker.",
-								array(
-									'file' => $file,
-									'cType' => 'core',
-									'canDiff' => false,
-									'canFix' => false,
-									'canDelete' => true,
-								)
-							);
-							
-							if ($added == wfIssues::ISSUE_ADDED || $added == wfIssues::ISSUE_UPDATED) { $this->haveIssues['coreUnknown'] = wfIssues::STATUS_PROBLEM; }
-							else if ($this->haveIssues['coreUnknown'] != wfIssues::STATUS_PROBLEM && ($added == wfIssues::ISSUE_IGNOREP || $added == wfIssues::ISSUE_IGNOREC)) { $this->haveIssues['coreUnknown'] = wfIssues::STATUS_IGNORED; }
+							if ($this->isPreviousCoreFile($shac)) {
+								$added = $this->engine->addIssue(
+									'knownfile',
+									2,
+									'coreUnknown' . $file,
+									'coreUnknown' . $file . $md5,
+									sprintf(__('Old WordPress core file not removed during update: %s', 'wordfence'), $file),
+									__('This file is in a WordPress core location but is from an older version of WordPress and not used with your current version. Hosting or permissions issues can cause these files to get left behind when WordPress is updated and they should be removed if possible.', 'wordfence'),
+									array(
+										'file' => $file,
+										'cType' => 'core',
+										'canDiff' => false,
+										'canFix' => false,
+										'canDelete' => true,
+									)
+								);
+							}
+							else {
+								$added = $this->engine->addIssue(
+									'knownfile',
+									2,
+									'coreUnknown' . $file,
+									'coreUnknown' . $file . $md5,
+									'Unknown file in WordPress core: ' . $file,
+									"This file is in a WordPress core location but is not distributed with this version of WordPress. This is usually due to it being left over from a previous WordPress update, but it may also have been added by another plugin or a malicious file added by an attacker.",
+									array(
+										'file' => $file,
+										'cType' => 'core',
+										'canDiff' => false,
+										'canFix' => false,
+										'canDelete' => true,
+									)
+								);
+							}
 						}
 					}
+					
+					if ($added == wfIssues::ISSUE_ADDED || $added == wfIssues::ISSUE_UPDATED) { $this->haveIssues['coreUnknown'] = wfIssues::STATUS_PROBLEM; }
+					else if ($this->haveIssues['coreUnknown'] != wfIssues::STATUS_PROBLEM && ($added == wfIssues::ISSUE_IGNOREP || $added == wfIssues::ISSUE_IGNOREC)) { $this->haveIssues['coreUnknown'] = wfIssues::STATUS_IGNORED; }
 				}
 			}
 			// knownFile means that the file is both part of core or a known plugin or theme AND that we recognize the file's hash. 
 			// we could split this into files whose path we recognize and file's whose path we recognize AND who have a valid sig.
 			// But because we want to scan files whose sig we don't recognize, regardless of known path or not, we only need one "knownFile" field.
-			$fileModsTable = $this->db->prefix() . 'wfFileMods';
+			$fileModsTable = wfDB::networkTable('wfFileMods');
 			$this->db->queryWrite("INSERT INTO {$fileModsTable} (filename, filenameMD5, knownFile, oldMD5, newMD5, SHAC) VALUES ('%s', UNHEX(MD5('%s')), %d, '', UNHEX('%s'), UNHEX('%s')) ON DUPLICATE KEY UPDATE newMD5 = UNHEX('%s'), SHAC = UNHEX('%s'), knownFile = %d", $file, $file, $knownFile, $md5, $shac, $md5, $shac, $knownFile);
 
 			$this->totalFiles++;
@@ -582,7 +628,7 @@ class wordfenceHash {
 		wfUtils::endProcessingFile();
 	}
 	private function _processPendingIssues() {
-		$fileModsTable = $this->db->prefix() . 'wfFileMods';
+		$fileModsTable = wfDB::networkTable('wfFileMods');
 		
 		$count = $this->engine->getPendingIssueCount();
 		$offset = 0;
@@ -696,58 +742,64 @@ class wordfenceHash {
 			$isHTML = true;
 		}
 		$isJS = false;
-		if (preg_match('/\.(?:js)(\.|$)/i', $file)) {
+		if (preg_match('/\.(?:js|svg)(\.|$)/i', $file)) {
 			$isJS = true;
 		}
 		
+		$options = $this->engine->scanController()->scanOptions();
+		
 		//If scan images is disabled, only allow .js through
 		if (!$isPHP && preg_match('/^(?:jpg|jpeg|mp3|avi|m4v|mov|mp4|gif|png|tiff?|svg|sql|js|tbz2?|bz2?|xz|zip|tgz|gz|tar|log|err\d+)$/', $fileExt)) {
-			if (!wfConfig::get('scansEnabled_scanImages') && !$isJS) {
+			if (!$options['scansEnabled_scanImages'] && !$isJS) {
 				return false;
 			}
 		}
 		
 		//If high sensitivity is disabled, don't allow .sql
 		if (strtolower($fileExt) == 'sql') {
-			if (!wfConfig::get('scansEnabled_highSense')) {
+			if (!$options['scansEnabled_highSense']) {
 				return false;
 			}
 		}
 		
 		//Treating as binary, return true
-		$treatAsBinary = ($isPHP || $isHTML || wfConfig::get('scansEnabled_scanImages'));
+		$treatAsBinary = ($isPHP || $isHTML || $options['scansEnabled_scanImages']);
 		if ($treatAsBinary) {
 			return true;
 		}
 		
 		//Will be malware scanned, return true
-		if ($fileExt == 'js') {
+		if ($isJS) {
 			return true;
 		}
 		
 		return false;
 	}
 	private function isMalwarePrefix($hexMD5){
-		$hasPrefix = $this->_prefixListContainsMD5($this->malwareData, wfUtils::hex2bin($hexMD5));
+		$hasPrefix = $this->_binaryListContains($this->malwareData, wfUtils::hex2bin($hexMD5), 4);
+		return $hasPrefix !== false;
+	}
+	private function isPreviousCoreFile($hexContentsSHAC) {
+		$hasPrefix = $this->_binaryListContains($this->coreHashesData, wfUtils::hex2bin($hexContentsSHAC), 32);
 		return $hasPrefix !== false;
 	}
 	
 	/**
-	 * @param $prefixList The prefix list to search, sorted as a binary string.
-	 * @param $md5 The binary MD5 hash to search for.
+	 * @param $binaryList The binary list to search, sorted as a binary string.
+	 * @param $needle The binary needle to search for.
+	 * @param int $size The byte size of each item in the list.
 	 * @return bool|int false if not found, otherwise the index in the list
 	 */
-	private function _prefixListContainsMD5($prefixList, $md5) {
-		$size = 4; //bytes
-		$p = substr($md5, 0, $size);
+	private function _binaryListContains($binaryList, $needle, $size /* bytes */) {
+		$p = substr($needle, 0, $size);
 		
-		$count = ceil(wfWAFUtils::strlen($prefixList) / $size);
+		$count = ceil(wfWAFUtils::strlen($binaryList) / $size);
 		$low = 0;
 		$high = $count - 1;
 		
 		while ($low <= $high) {
 			$mid = (int) (($high + $low) / 2);
-			$val = wfWAFUtils::substr($prefixList, $mid * $size, $size);
+			$val = wfWAFUtils::substr($binaryList, $mid * $size, $size);
 			$cmp = strcmp($val, $p);
 			if ($cmp < 0) {
 				$low = $mid + 1;
@@ -786,4 +838,3 @@ class wordfenceHash {
 		return false;
 	}
 }
-?>

@@ -3,37 +3,37 @@
 Plugin Name: FlowPaper
 Plugin URI: https://wordpress.org/plugins/flowpaper-lite-pdf-flipbook
 Description: Shortcode for adding a PDF flipbook to a post: [flipbook pdf="http://yourwebsite.com/yourdocument.pdf"]. Replace the URL with a URL to a PDF document you want to publish.
-Version: 1.8.4
+Version: 1.9.0
 Author: Devaldi Ltd
 Author URI: https://flowpaper.com
 License: GPLv3
 */
 
-define('FLOWPAPER_PLUGIN_VERSION', '1.8.4');
+define('FLOWPAPER_PLUGIN_VERSION', '1.9.0');
 
 function flowpaper_plugin_parse_request($wp) {
     try {
     if (array_key_exists('flowpaper-lite-plugin', $wp->query_vars)
             && $wp->query_vars['flowpaper-lite-plugin'] == 'get-pdf') {
 
-        $uploadDir      = wp_upload_dir();
-	      $pdf_dir 	      = is_array($uploadDir) && sizeof($uploadDir)>0?$uploadDir['basedir']:WP_CONTENT_DIR . '/uploads';
-		    $path_parts     = pathinfo($_GET['pdf']);
-		    $file_name      = $path_parts['basename'];
-        $attachment_id  = get_attachment_id_by_url($_GET['pdf']);
-        $file_path      = ( $attachment_id ) ? get_attached_file( $attachment_id ) : null;
-        $filepathinfo   = pathinfo($file_path);
+            $uploadDir      = wp_upload_dir();
+            $pdf_dir 	      = is_array($uploadDir) && sizeof($uploadDir)>0?$uploadDir['basedir']:WP_CONTENT_DIR . '/uploads';
+            $path_parts     = pathinfo($_GET['pdf']);
+            $file_name      = $path_parts['basename'];
+            $attachment_id  = get_attachment_id_by_url_flowpaper($_GET['pdf']);
+            $file_path      = ( $attachment_id ) ? get_attached_file( $attachment_id ) : null;
+            $filepathinfo   = pathinfo($file_path);
 
-        if($file_path ==null || strpos($filepathinfo['dirname'],$pdf_dir) != 0 || !validPDFParams($file_path,$file_name)){
-          die();
-          return;
-        }else{
+          if($file_path ==null || strpos($filepathinfo['dirname'],$pdf_dir) != 0 || !validPDFParams($file_path,$file_name)){
+            die();
+            return;
+          }else{
           $filesize = filesize($file_path);
 
           //unset magic quotes; otherwise, file contents will be modified
           if(version_compare(PHP_VERSION, '5.3.0', '<')){
-		    set_magic_quotes_runtime(0);
-		  }
+		          set_magic_quotes_runtime(0);
+		      }
 
           //do not send cache limiter header
           ini_set('session.cache_limiter','none');
@@ -265,7 +265,7 @@ function validPDFParams($path,$doc){
 				);
 }
 
-function get_attachment_id_by_url( $url ) {
+function get_attachment_id_by_url_flowpaper( $url ) {
 	// Split the $url into two parts with the wp-content directory as the separator
 	$parsed_url  = explode( parse_url( WP_CONTENT_URL, PHP_URL_PATH ), $url );
 
@@ -288,6 +288,12 @@ function get_attachment_id_by_url( $url ) {
 	return $attachment[0];
 }
 
+function add_lity_script(){
+    wp_register_script('lity-js', plugins_url( '/assets/lity/lity.min.js', __FILE__ ), array( 'jquery' ), NULL, false);
+    wp_enqueue_script( 'lity-js' );
+    wp_enqueue_style('lity-css', plugins_url( '/assets/lity/lity.min.css', __FILE__ ), false, NULL, 'all');
+}
+
 function flowpaper_plugin_add_shortcode_cb( $atts, $content="" ) {
 	$defaults = array(
 		'width' => '100%',
@@ -304,67 +310,138 @@ function flowpaper_plugin_add_shortcode_cb( $atts, $content="" ) {
 		}
 	}
 
-	$html           = "\n".'<!-- FlowPaper PDF flipbook plugin v.'.FLOWPAPER_PLUGIN_VERSION.' wordpress.org/plugins/flowpaper/ -->'."\n";
-	$html          .= '<iframe title="FlowPaper website pdf viewer"';
-  $pdfUrl         = "";
-  $theme          = "";
-  $thumbs         = true;
-  $title          = "";
-  $header         = "";
-  $cloudhosted    = false;
-
-	foreach( $atts as $attr => $value ) {
-		if ( strtolower($attr) != 'same_height_as' AND strtolower($attr) != 'onload'
-			AND strtolower($attr) != 'onpageshow' AND strtolower($attr) != 'onclick') { // remove some attributes
-
-			if(strtolower($attr) == 'pdf'){ // append url at the end of the base url
-        if(strpos($value,'publ.flowpaper.com') > 0 || strpos($value,'online.flowpaper.com') > 0){
-            $pdfUrl = esc_attr( $value );
-            $cloudhosted = true;
-        }else{
-            $pdfUrl = 'http://flowpaper.com/flipbook/?pdf=' . esc_attr( $value ) . (strpos(esc_attr($value),WP_CONTENT_URL)===0?"?wp-hosted=1":"");
-
-    				if(!empty($_SERVER['HTTPS'])){ // use https if PDF is on a https url
-                $pdfUrl = 'https://flowpaper.com/flipbook/?pdf=' . esc_attr( $value ) . (strpos(esc_attr($value),WP_CONTENT_URL)===0?"?wp-hosted=1":"");
-    				}
+    // Check if we're embedding through a link or iframe
+    $linkEmbed = false;
+    foreach( $atts as $attr => $value ) {
+        if(strtolower($attr) == 'lightbox' && $value == 'true'){
+            $linkEmbed = true;
         }
-			}else if(strtolower($attr) == 'theme'){
-          $theme = esc_attr( $value );
-      }else if(strtolower($attr) == 'title'){
-          $title = esc_attr( $value );
-      }else if(strtolower($attr) == 'header'){
-          $header = esc_attr( $value );
-      }else if(strtolower($attr) == 'thumbs'){
-          $thumbs = esc_attr( $value );
-      } else if ( $value != '' ) { // adding all attributes
-				$html .= ' ' . esc_attr( $attr ) . '="' . esc_attr( $value ) . '"';
-			} else { // adding empty attributes
-				$html .= ' ' . esc_attr( $attr );
-			}
-		}
-	}
+    }
 
-  $html .= ' src = "' . $pdfUrl . (!$cloudhosted?('&title=' . $title . '&header=' . $header . '&theme=' . $theme .'&thumbs=' . $thumbs . '&modified=' . get_the_modified_date('ymdgi')):'') . '"';
-	$html .= ' seamless="seamless">Your browser does not seem to support iframes. <a href="' . $pdfUrl . '" target="_blank">Click here to read this PDF</a>.</iframe>'."\n";
+    $html           = "\n".'<!-- FlowPaper PDF flipbook plugin v.'.FLOWPAPER_PLUGIN_VERSION.' wordpress.org/plugins/flowpaper/ -->'."\n";
 
-	if ( isset( $atts["same_height_as"] ) ) {
-		$html .= '
-			<script>
-			document.addEventListener("DOMContentLoaded", function(){
-				var target_element, iframe_element;
-				iframe_element = document.querySelector("iframe.' . esc_attr( $atts["class"] ) . '");
-				target_element = document.querySelector("' . esc_attr( $atts["same_height_as"] ) . '");
-				iframe_element.style.height = target_element.offsetHeight + "px";
-			});
-			</script>
-		';
-	}
+    if($linkEmbed){
+        $title          = "";
+        $cover          = "";
+        $pdfUrl         = "";
+        $theme          = "";
+        $singlepage     = "auto";
+        $thumbs         = true;
+        $title          = "";
+        $header         = "";
+        $cloudhosted    = false;
 
+        foreach( $atts as $attr => $value ) {
+            if ( strtolower($attr) != 'same_height_as' AND strtolower($attr) != 'onload'
+                AND strtolower($attr) != 'onpageshow' AND strtolower($attr) != 'onclick') { // remove some attributes
+
+                if(strtolower($attr) == 'pdf'){ // append url at the end of the base url
+                if(strpos($value,'publ.flowpaper.com') > 0 || strpos($value,'online.flowpaper.com') > 0){
+                    $pdfUrl = esc_attr( $value );
+                    $cloudhosted = true;
+
+                    // make sure we're using https if the website that has embedded the viewer is using https
+                    if(!empty($_SERVER['HTTPS'])){
+                        $pdfUrl = str_replace("http://","https://",$pdfUrl);
+                    }
+                }else{
+                    $pdfUrl = 'http://flowpaper.com/flipbook/?pdf=' . esc_attr( $value ) . (strpos(esc_attr($value),WP_CONTENT_URL)===0?"?wp-hosted=1":"");
+
+                    if(!empty($_SERVER['HTTPS'])){ // use https if PDF is on a https url
+                        $pdfUrl = 'https://flowpaper.com/flipbook/?pdf=' . esc_attr( $value ) . (strpos(esc_attr($value),WP_CONTENT_URL)===0?"?wp-hosted=1":"");
+                    }
+                }
+              }else if(strtolower($attr) == 'theme'){
+                 $theme = esc_attr( $value );
+              }else if(strtolower($attr) == 'title'){
+                 $title = esc_attr( $value );
+              }else if(strtolower($attr) == 'cover'){
+                 $cover = esc_attr( $value );
+              }else if(strtolower($attr) == 'singlepage'){
+                 $singlepage = esc_attr( $value );
+              }
+            }
+        }
+
+        $html          .= '<a data-lity href="' . $pdfUrl . (!$cloudhosted?('&title=' . $title . '&header=' . $header . '&theme=' . $theme . '&singlepage=' . $singlepage . '&thumbs=' . $thumbs . '&modified=' . get_the_modified_date('ymdgi')):'') . '">';
+        if(strlen($cover) == 0 && strlen($title) > 0){
+            $html      .= $title;
+        }else if(strlen($cover) > 0){
+            $html      .= '<img src="' . $cover . '" class="aligncenter">';
+        }else{
+            $html      .= $pdfUrl;
+        }
+        $html          .= '</a>';
+    }else{
+        $html          .= '<iframe title="FlowPaper website pdf viewer"';
+        $pdfUrl         = "";
+        $theme          = "";
+        $singlepage     = "auto";
+        $thumbs         = true;
+        $title          = "";
+        $header         = "";
+        $cloudhosted    = false;
+
+        foreach( $atts as $attr => $value ) {
+            if ( strtolower($attr) != 'same_height_as' AND strtolower($attr) != 'onload'
+                AND strtolower($attr) != 'onpageshow' AND strtolower($attr) != 'onclick') { // remove some attributes
+
+                if(strtolower($attr) == 'pdf'){ // append url at the end of the base url
+                    if(strpos($value,'publ.flowpaper.com') > 0 || strpos($value,'online.flowpaper.com') > 0){
+                        $pdfUrl = esc_attr( $value );
+                        $cloudhosted = true;
+
+                        // make sure we're using https if the website that has embedded the viewer is using https
+                        if(!empty($_SERVER['HTTPS'])){
+                            $pdfUrl = str_replace("http://","https://",$pdfUrl);
+                        }
+                    }else{
+                        $pdfUrl = 'http://flowpaper.com/flipbook/?pdf=' . esc_attr( $value ) . (strpos(esc_attr($value),WP_CONTENT_URL)===0?"?wp-hosted=1":"");
+
+                        if(!empty($_SERVER['HTTPS'])){ // use https if PDF is on a https url
+                            $pdfUrl = 'https://flowpaper.com/flipbook/?pdf=' . esc_attr( $value ) . (strpos(esc_attr($value),WP_CONTENT_URL)===0?"?wp-hosted=1":"");
+                        }
+                    }
+                }else if(strtolower($attr) == 'theme'){
+                      $theme = esc_attr( $value );
+                }else if(strtolower($attr) == 'title'){
+                      $title = esc_attr( $value );
+                }else if(strtolower($attr) == 'header'){
+                      $header = esc_attr( $value );
+                }else if(strtolower($attr) == 'singlepage'){
+                      $singlepage = esc_attr( $value );
+                }else if(strtolower($attr) == 'thumbs'){
+                      $thumbs = esc_attr( $value );
+                } else if ( $value != '' ) { // adding all attributes
+                      $html .= ' ' . esc_attr( $attr ) . '="' . esc_attr( $value ) . '"';
+                } else { // adding empty attributes
+                      $html .= ' ' . esc_attr( $attr );
+                }
+            }
+        }
+
+        $html .= ' src = "' . $pdfUrl . (!$cloudhosted?('&title=' . $title . '&header=' . $header . '&theme=' . $theme . '&singlepage=' . $singlepage . '&thumbs=' . $thumbs . '&modified=' . get_the_modified_date('ymdgi')):'') . '"';
+        $html .= ' seamless="seamless">Your browser does not seem to support iframes. <a href="' . $pdfUrl . '" target="_blank">Click here to read this PDF</a>.</iframe>'."\n";
+
+        if ( isset( $atts["same_height_as"] ) ) {
+            $html .= '
+                <script>
+                document.addEventListener("DOMContentLoaded", function(){
+                    var target_element, iframe_element;
+                    iframe_element = document.querySelector("iframe.' . esc_attr( $atts["class"] ) . '");
+                    target_element = document.querySelector("' . esc_attr( $atts["same_height_as"] ) . '");
+                    iframe_element.style.height = target_element.offsetHeight + "px";
+                });
+                </script>
+            ';
+        }
+    }
 	return $html;
 }
 
 add_shortcode( 'flipbook', 'flowpaper_plugin_add_shortcode_cb' );
 add_action('parse_request', 'flowpaper_plugin_parse_request');
+add_action('wp_enqueue_scripts', 'add_lity_script');
 
 function flowpaper_lite_queryvars($vars) {
     $vars[] = 'flowpaper-lite-plugin';
