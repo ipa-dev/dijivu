@@ -1,0 +1,8 @@
+{
+    "require": {
+        "setasign/fpdf": "^1.8",
+        "spipu/html2pdf": "^5.2",
+        "stripe/stripe-php": "^6.15",
+        "vlucas/phpdotenv": "^2.5"
+    }
+}

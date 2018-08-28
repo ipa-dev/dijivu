@@ -1,0 +1,5 @@
+wp-content/themes/dijivu/node_modules
+.DS_Store
+.env
+vendor
+wp-content/uploads
